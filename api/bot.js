@@ -13,12 +13,11 @@ export default async function handler(req) {
 
   const message = JSON.parse(body);
 
-  // 1. AUTOCOMPLETE (Sistem Dropdown Otomatis)
+  // 1. AUTOCOMPLETE: Membantu user memilih tim
   if (message.type === 4) {
     const userInput = message.data.options[0].value.toLowerCase();
-    // Kita ambil semua key tim dari KV
-    const semuaTim = await kv.keys('*'); 
-    const filtered = semuaTim.filter(t => t.startsWith(userInput)).slice(0, 25);
+    const semuaTim = await kv.keys('*');
+    const filtered = semuaTim.filter(t => t.toLowerCase().includes(userInput)).slice(0, 25);
     
     return Response.json({
       type: 8,
@@ -26,27 +25,35 @@ export default async function handler(req) {
     });
   }
 
-  // 2. SLASH COMMAND /roster
+  // 2. SLASH COMMAND: /roster
   if (message.type === 2 && message.data.name === 'roster') {
     const timId = message.data.options[0].value;
     const data = await kv.get(timId);
 
     if (!data) {
-      return Response.json({ type: 4, data: { flags: 64, content: "Tim tidak ditemukan!" } });
+      return Response.json({ type: 4, data: { flags: 64, content: `❌ Tim **${timId}** tidak ditemukan!` } });
     }
+
+    // Mengolah roster (jika formatnya array, kita join dengan baris baru)
+    const rosterList = Array.isArray(data.roster) ? data.roster.join('\n') : data.roster;
 
     return Response.json({
       type: 4,
       data: {
-        flags: 64, // Hanya user yang melihat
+        flags: 64, // Ephemeral (hanya user yang melihat)
         embeds: [{
-          title: `🛡️ ${data.nama_tim}`,
-          color: parseInt(data.hex_color.replace('#', ''), 16),
-          thumbnail: { url: data.logo },
+          title: data.nama_tim || timId,
+          description: `*${data.slogan || 'No slogan'}*\n\n**Ketua** \u00A0 \u00A0 **Wakil** \u00A0 \u00A0 **Pelatih**\n${data.ketua || '-'} \u00A0 \u00A0 ${data.wakil || '-'} \u00A0 \u00A0 ${data.pelatih || '-'}`,
+          color: parseInt((data.hex_color || '#ff0000').replace('#', ''), 16),
+          thumbnail: { url: data.logo || '' },
           fields: [
-            { name: "👑 Ketua", value: data.ketua, inline: true },
-            { name: "👥 Roster", value: data.roster.join('\n') }
-          ]
+            { 
+              name: "Players", 
+              value: rosterList, 
+              inline: false 
+            }
+          ],
+          footer: { text: `Diperbarui ${new Date().toLocaleDateString('id-ID')}` }
         }]
       }
     });
