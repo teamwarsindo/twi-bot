@@ -13,40 +13,32 @@ export default async function handler(req) {
   const timestamp = req.headers.get('x-signature-timestamp');
   const body = await req.text();
 
-  // INI ADALAH KODE MATA-MATA KITA
-  console.log("=== MEMULAI INVESTIGASI ===");
-  console.log("1. Signature ada?:", !!signature);
-  console.log("2. Timestamp ada?:", !!timestamp);
-  console.log("3. Panjang Kunci Discord:", process.env.DISCORD_PUBLIC_KEY ? process.env.DISCORD_PUBLIC_KEY.length : "KUNCI KOSONG/TIDAK TERBACA");
-  console.log("4. Isi Body:", body);
-
   try {
-    const isValid = verifyKey(
+    // INI DIA KUNCI JAWABANNYA: Kata "await" di depan verifyKey!
+    const isValid = await verifyKey(
       body, 
       signature, 
       timestamp, 
       process.env.DISCORD_PUBLIC_KEY
     );
 
-    console.log("5. Hasil Verifikasi Aman?:", isValid);
-
     if (!isValid) {
-      console.error("GAGAL: Kunci tidak cocok dengan signature Discord!");
-      return new Response('Akses Ditolak', { status: 401 });
+      return new Response('Akses Ditolak: Signature Palsu', { status: 401 });
     }
 
     const message = JSON.parse(body);
-    console.log("6. Tipe Pesan:", message.type);
 
     if (message.type === 1) {
-      console.log("SUKSES: Merespons PING dari Discord");
       return Response.json({ type: 1 });
     }
 
-    return Response.json({ type: 4, data: { content: 'Sukses!' } });
+    if (message.type === 2 && message.data.name === 'ping') {
+      return Response.json({ type: 4, data: { content: 'Pong! 🏓 Selamat! Gerbang Discord berhasil ditaklukkan!' } });
+    }
+
+    return Response.json({ error: 'Unknown Interaction' }, { status: 400 });
 
   } catch (error) {
-    console.error("ERROR SISTEM:", error.message);
     return new Response('Server Error', { status: 500 });
   }
 }
