@@ -28,23 +28,52 @@ export default async function handler(req) {
 
     const message = JSON.parse(body);
 
-    // 1. Balasan untuk verifikasi awal Discord
+    // 1. Verifikasi awal dari Discord Developer Portal
     if (message.type === 1) {
       return Response.json({ type: 1 });
     }
 
-    // 2. Balasan untuk command /ping beserta Vercel KV
-    if (message.type === 2 && message.data.name === 'ping') {
-      
-      // Memanggil Vercel KV untuk menghitung jumlah ping
-      const currentPing = await kv.incr('bot_ping_count');
+    // 2. Membaca jenis interaksi perintah (Slash Commands)
+    if (message.type === 2) {
+      const { name } = message.data;
 
-      return Response.json({ 
-        type: 4, 
-        data: { 
-          content: `Pong! 🏓 Gerbang Discord ditaklukkan! Database aktif: Command ini telah dipanggil sebanyak **${currentPing}** kali.` 
-        } 
-      });
+      // PERINTAH UTAMA: /ping (Kembali Normal)
+      if (name === 'ping') {
+        return Response.json({ 
+          type: 4, 
+          data: { content: 'Pong! 🏓 Sistem bot berjalan dengan lancar!' } 
+        });
+      }
+
+      // PERINTAH BARU: /roster
+      if (name === 'roster') {
+        // Memastikan data dummy tersimpan di database
+        const dataDummy = {
+          nama_tim: "Alpha Esports",
+          kapten: "PlayerOne",
+          roster: ["PlayerOne", "Striker99", "MageLord", "TankerZ", "SupportX"],
+          logo: "https://dummyimage.com/300x300/000/fff&text=Alpha+Logo"
+        };
+        await kv.set('tim_alpha', dataDummy);
+
+        // Mengambil data dari database
+        const dataTim = await kv.get('tim_alpha');
+
+        if (!dataTim) {
+          return Response.json({
+            type: 4,
+            data: { content: '❌ Gagal mengambil data tim dari database!' }
+          });
+        }
+
+        const daftarPemain = dataTim.roster.map(pemain => `• ${pemain}`).join('\n');
+        const balasanDiscord = `🛡️ **INFORMASI TIM: ${dataTim.nama_tim}**\n\n**👑 Kapten:** ${dataTim.kapten}\n\n**👥 Daftar Roster:**\n${daftarPemain}\n\n**🖼️ Logo Tim:**\n${dataTim.logo}`;
+
+        return Response.json({ 
+          type: 4, 
+          data: { content: balasanDiscord } 
+        });
+      }
     }
 
     return Response.json({ error: 'Unknown Interaction' }, { status: 400 });
