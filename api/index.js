@@ -1,46 +1,63 @@
 import { verifyKey } from 'discord-interactions';
 import { kv } from '@vercel/kv';
 
+// Mematikan parser bawaan Vercel agar data tidak rusak saat diverifikasi Discord
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 export default async function handler(req, res) {
-  // 1. Verifikasi Keamanan dari Discord
+  if (req.method !== 'POST') {
+    return res.status(405).send('Method Not Allowed');
+  }
+
+  // Membaca data mentah (raw data) persis seperti yang dikirim Discord
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+  const rawBody = Buffer.concat(chunks).toString('utf8');
+
   const signature = req.headers['x-signature-ed25519'];
   const timestamp = req.headers['x-signature-timestamp'];
-  const rawBody = JSON.stringify(req.body);
 
+  // Proses verifikasi keamanan menggunakan data yang belum diubah
   const isValidRequest = verifyKey(
     rawBody,
     signature,
     timestamp,
-    process.env.DISCORD_PUBLIC_KEY 
+    process.env.DISCORD_PUBLIC_KEY
   );
 
   if (!isValidRequest) {
-    return res.status(401).send('Bad request signature'); 
+    return res.status(401).send('Bad request signature');
   }
 
-  const message = req.body;
+  // Setelah dinyatakan aman oleh Discord, baru kita terjemahkan pesannya
+  const message = JSON.parse(rawBody);
 
-  // 2. Handle PING dari Discord Developer Portal
+  // Balasan untuk Discord Developer Portal
   if (message.type === 1) {
     return res.status(200).json({ type: 1 });
   }
 
-  // 3. Handle Slash Commands
+  // Balasan untuk command /ping
   if (message.type === 2) {
     const { name } = message.data;
 
     if (name === 'ping') {
-      // Menggunakan Vercel KV: Menambah angka setiap kali command dipanggil
       const currentPing = await kv.incr('bot_ping_count');
 
       return res.status(200).json({
         type: 4, 
         data: {
-          content: "Pong! 🏓 Koneksi Vercel KV sukses! Command ini telah dipanggil sebanyak " + currentPing + " kali.",
+          content: `Pong! 🏓 Koneksi Vercel KV sukses! Command ini telah dipanggil sebanyak **${currentPing}** kali.`,
         },
       });
     }
   }
 
   return res.status(400).json({ error: 'Unknown Interaction Type' });
-        }
+}
