@@ -1,24 +1,31 @@
 import { verifyKey } from 'discord-interactions';
 import { kv } from '@vercel/kv';
-import { REST } from '@discordjs/rest';
-import { Routes } from 'discord-api-types/v10';
 
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
   const body = await req.text();
-  const message = JSON.parse(body);
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  const signature = req.headers.get('x-signature-ed25519');
+  const timestamp = req.headers.get('x-signature-timestamp');
 
-  // 1. AUTOCOMPLETE
+  const isValid = await verifyKey(body, signature, timestamp, process.env.DISCORD_PUBLIC_KEY);
+  if (!isValid) return new Response('Signature Invalid', { status: 401 });
+
+  const message = JSON.parse(body);
+
+  // 1. AUTOCOMPLETE: User memilih tim
   if (message.type === 4) {
     const userInput = message.data.options[0].value.toLowerCase();
     const semuaTim = await kv.keys('*');
     const filtered = semuaTim.filter(t => t.includes(userInput)).slice(0, 25);
-    return Response.json({ type: 8, data: { choices: filtered.map(t => ({ name: t, value: t })) } });
+    
+    return Response.json({
+      type: 8,
+      data: { choices: filtered.map(t => ({ name: t, value: t })) }
+    });
   }
 
-  // 2. SLASH COMMAND: /setup-all (TOMBOL AJAIB)
+  // 2. SLASH COMMAND: /setup-all (Admin Only)
   if (message.type === 2 && message.data.name === 'setup-all') {
     const teams = Array.from({ length: 5 }, (_, i) => ({
       key: `tim_${i + 1}`,
@@ -33,19 +40,30 @@ export default async function handler(req) {
     for (const team of teams) {
       // Simpan ke KV
       await kv.set(team.key, team);
-      // Buat Role di Discord
-      await rest.post(Routes.guildRoles(message.guild_id), {
-        body: { name: team.nama_tim, color: 15158332, mentionable: true }
+      
+      // Buat Role di Discord via Fetch
+      await fetch(`https://discord.com/api/v10/guilds/${message.guild_id}/roles`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bot ${process.env.DISCORD_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: team.nama_tim,
+          color: parseInt(team.hex_color.replace('#', ''), 16),
+          mentionable: true
+        })
       });
     }
-    return Response.json({ type: 4, data: { content: "✅ 5 Tim Dummy & Role berhasil dibuat!" } });
+    return Response.json({ type: 4, data: { content: "✅ 5 Tim & Role berhasil dibuat!" } });
   }
 
-  // 3. SLASH COMMAND: /roster
+  // 3. SLASH COMMAND: /roster (Publik)
   if (message.type === 2 && message.data.name === 'roster') {
     const timId = message.data.options[0].value;
     const data = await kv.get(timId);
-    if (!data) return Response.json({ type: 4, data: { flags: 64, content: "Tim tidak ditemukan!" } });
+    
+    if (!data) return Response.json({ type: 4, data: { flags: 64, content: "❌ Tim tidak ditemukan!" } });
 
     return Response.json({
       type: 4,
