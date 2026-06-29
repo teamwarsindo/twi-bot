@@ -1,4 +1,5 @@
 import { verifyKey } from 'discord-interactions';
+import { kv } from '@vercel/kv';
 
 export const config = {
   runtime: 'edge',
@@ -14,7 +15,6 @@ export default async function handler(req) {
   const body = await req.text();
 
   try {
-    // INI DIA KUNCI JAWABANNYA: Kata "await" di depan verifyKey!
     const isValid = await verifyKey(
       body, 
       signature, 
@@ -28,12 +28,23 @@ export default async function handler(req) {
 
     const message = JSON.parse(body);
 
+    // 1. Balasan untuk verifikasi awal Discord
     if (message.type === 1) {
       return Response.json({ type: 1 });
     }
 
+    // 2. Balasan untuk command /ping beserta Vercel KV
     if (message.type === 2 && message.data.name === 'ping') {
-      return Response.json({ type: 4, data: { content: 'Pong! 🏓 Selamat! Gerbang Discord berhasil ditaklukkan!' } });
+      
+      // Memanggil Vercel KV untuk menghitung jumlah ping
+      const currentPing = await kv.incr('bot_ping_count');
+
+      return Response.json({ 
+        type: 4, 
+        data: { 
+          content: `Pong! 🏓 Gerbang Discord ditaklukkan! Database aktif: Command ini telah dipanggil sebanyak **${currentPing}** kali.` 
+        } 
+      });
     }
 
     return Response.json({ error: 'Unknown Interaction' }, { status: 400 });
