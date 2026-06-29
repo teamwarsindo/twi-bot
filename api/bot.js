@@ -1,59 +1,62 @@
 import { verifyKey } from 'discord-interactions';
 import { kv } from '@vercel/kv';
+import { REST } from '@discordjs/rest';
+import { Routes } from 'discord-api-types/v10';
 
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
   const body = await req.text();
-  const signature = req.headers.get('x-signature-ed25519');
-  const timestamp = req.headers.get('x-signature-timestamp');
-
-  const isValid = await verifyKey(body, signature, timestamp, process.env.DISCORD_PUBLIC_KEY);
-  if (!isValid) return new Response('Signature Invalid', { status: 401 });
-
   const message = JSON.parse(body);
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
-  // 1. AUTOCOMPLETE: Membantu user memilih tim
+  // 1. AUTOCOMPLETE
   if (message.type === 4) {
     const userInput = message.data.options[0].value.toLowerCase();
     const semuaTim = await kv.keys('*');
-    const filtered = semuaTim.filter(t => t.toLowerCase().includes(userInput)).slice(0, 25);
-    
-    return Response.json({
-      type: 8,
-      data: { choices: filtered.map(t => ({ name: t, value: t })) }
-    });
+    const filtered = semuaTim.filter(t => t.includes(userInput)).slice(0, 25);
+    return Response.json({ type: 8, data: { choices: filtered.map(t => ({ name: t, value: t })) } });
   }
 
-  // 2. SLASH COMMAND: /roster
+  // 2. SLASH COMMAND: /setup-all (TOMBOL AJAIB)
+  if (message.type === 2 && message.data.name === 'setup-all') {
+    const teams = Array.from({ length: 5 }, (_, i) => ({
+      key: `tim_${i + 1}`,
+      nama_tim: `Team ${i + 1}`,
+      hex_color: "#E74C3C",
+      logo: "https://img.magnific.com/vektor-gratis/logo-vektor-gradien-warna-warni-burung_343694-1365.jpg",
+      ketua: "Ketua A",
+      wakil: "Wakil B",
+      roster: ["IGN1 (111-222)", "IGN2 (333-444)"]
+    }));
+
+    for (const team of teams) {
+      // Simpan ke KV
+      await kv.set(team.key, team);
+      // Buat Role di Discord
+      await rest.post(Routes.guildRoles(message.guild_id), {
+        body: { name: team.nama_tim, color: 15158332, mentionable: true }
+      });
+    }
+    return Response.json({ type: 4, data: { content: "✅ 5 Tim Dummy & Role berhasil dibuat!" } });
+  }
+
+  // 3. SLASH COMMAND: /roster
   if (message.type === 2 && message.data.name === 'roster') {
     const timId = message.data.options[0].value;
     const data = await kv.get(timId);
-
-    if (!data) {
-      return Response.json({ type: 4, data: { flags: 64, content: `❌ Tim **${timId}** tidak ditemukan!` } });
-    }
-
-    // Mengolah roster (jika formatnya array, kita join dengan baris baru)
-    const rosterList = Array.isArray(data.roster) ? data.roster.join('\n') : data.roster;
+    if (!data) return Response.json({ type: 4, data: { flags: 64, content: "Tim tidak ditemukan!" } });
 
     return Response.json({
       type: 4,
       data: {
-        flags: 64, // Ephemeral (hanya user yang melihat)
+        flags: 64,
         embeds: [{
-          title: data.nama_tim || timId,
-          description: `*${data.slogan || 'No slogan'}*\n\n**Ketua** \u00A0 \u00A0 **Wakil** \u00A0 \u00A0 **Pelatih**\n${data.ketua || '-'} \u00A0 \u00A0 ${data.wakil || '-'} \u00A0 \u00A0 ${data.pelatih || '-'}`,
-          color: parseInt((data.hex_color || '#ff0000').replace('#', ''), 16),
-          thumbnail: { url: data.logo || '' },
-          fields: [
-            { 
-              name: "Players", 
-              value: rosterList, 
-              inline: false 
-            }
-          ],
-          footer: { text: `Diperbarui ${new Date().toLocaleDateString('id-ID')}` }
+          title: `🛡️ ${data.nama_tim}`,
+          color: parseInt(data.hex_color.replace('#', ''), 16),
+          thumbnail: { url: data.logo },
+          description: `**Ketua:** ${data.ketua}\n**Wakil:** ${data.wakil}`,
+          fields: [{ name: "Players (IGN - ID)", value: data.roster.join('\n'), inline: false }]
         }]
       }
     });
