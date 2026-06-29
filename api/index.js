@@ -1,29 +1,24 @@
 import { verifyKey } from 'discord-interactions';
-import { kv } from '@vercel/kv';
 
-// Mematikan parser bawaan Vercel agar data tidak rusak saat diverifikasi Discord
+// Mengubah mesin ke Edge Runtime (Jauh lebih cepat dan anti-gagal untuk Discord)
 export const config = {
-  api: {
-    bodyParser: false,
-  },
+  runtime: 'edge',
 };
 
-export default async function handler(req, res) {
+export default async function handler(req) {
+  // Hanya melayani metode POST
   if (req.method !== 'POST') {
-    return res.status(405).send('Method Not Allowed');
+    return new Response('Method Not Allowed', { status: 405 });
   }
 
-  // Membaca data mentah (raw data) persis seperti yang dikirim Discord
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-  const rawBody = Buffer.concat(chunks).toString('utf8');
+  // Mengambil Headers menggunakan standar Web API modern
+  const signature = req.headers.get('x-signature-ed25519');
+  const timestamp = req.headers.get('x-signature-timestamp');
+  
+  // Mengambil body persis secara mentah tanpa parser yang merusak format
+  const rawBody = await req.text();
 
-  const signature = req.headers['x-signature-ed25519'];
-  const timestamp = req.headers['x-signature-timestamp'];
-
-  // Proses verifikasi keamanan menggunakan data yang belum diubah
+  // Verifikasi Kunci Rahasia
   const isValidRequest = verifyKey(
     rawBody,
     signature,
@@ -32,32 +27,37 @@ export default async function handler(req, res) {
   );
 
   if (!isValidRequest) {
-    return res.status(401).send('Bad request signature');
+    return new Response('Bad request signature', { status: 401 });
   }
 
-  // Setelah dinyatakan aman oleh Discord, baru kita terjemahkan pesannya
+  // Jika aman, kita bedah pesannya
   const message = JSON.parse(rawBody);
 
-  // Balasan untuk Discord Developer Portal
+  // 1. Balasan Wajib saat menyimpan URL di Portal Discord
   if (message.type === 1) {
-    return res.status(200).json({ type: 1 });
+    return new Response(JSON.stringify({ type: 1 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  // Balasan untuk command /ping
+  // 2. Balasan untuk Slash Command (/ping)
   if (message.type === 2) {
-    const { name } = message.data;
-
-    if (name === 'ping') {
-      const currentPing = await kv.incr('bot_ping_count');
-
-      return res.status(200).json({
-        type: 4, 
-        data: {
-          content: `Pong! 🏓 Koneksi Vercel KV sukses! Command ini telah dipanggil sebanyak **${currentPing}** kali.`,
-        },
-      });
+    if (message.data.name === 'ping') {
+      return new Response(
+        JSON.stringify({
+          type: 4, 
+          data: {
+            content: 'Pong! 🏓 Sistem Vercel Edge sukses merespons!',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
   }
 
-  return res.status(400).json({ error: 'Unknown Interaction Type' });
+  return new Response('Unknown Interaction Type', { status: 400 });
 }
